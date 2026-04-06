@@ -280,3 +280,6 @@ export type { Content, Part, FunctionCall } from '@google/genai';
 // Export context types and profiles
 export * from './context/types.js';
 export * from './context/profiles.js';
+export * from './context/chatCompressionService.js';
+
+

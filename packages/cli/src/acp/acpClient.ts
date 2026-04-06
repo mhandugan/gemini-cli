@@ -52,6 +52,8 @@ import {
   InvalidStreamError,
   type AgentLoopContext,
   updatePolicy,
+  CompressionStatus,
+  ChatCompressionService,
 } from '@google/gemini-cli-core';
 import * as acp from '@agentclientprotocol/sdk';
 import { AcpFileSystemService } from './fileSystemService.js';
@@ -689,6 +691,42 @@ export class Session {
     }
   }
 
+  async tryCompressChat(
+    prompt_id: string,
+    force: boolean = false,
+    abortSignal?: AbortSignal,
+  ) {
+    const model = this.context.config.getActiveModel();
+
+    const { newHistory, info } = await this.compressionService.compress(
+      this.chat,
+      prompt_id,
+      force,
+      model,
+      this.context.config,
+      this.hasFailedCompressionAttempt,
+      abortSignal,
+    );
+
+    if (
+      info.compressionStatus ===
+      CompressionStatus.COMPRESSION_FAILED_INFLATED_TOKEN_COUNT
+    ) {
+      this.hasFailedCompressionAttempt =
+        this.hasFailedCompressionAttempt || !force;
+    } else if (info.compressionStatus === CompressionStatus.COMPRESSED) {
+      if (newHistory) {
+        this.chat.setHistory(newHistory);
+      }
+    } else if (info.compressionStatus === CompressionStatus.CONTENT_TRUNCATED) {
+      if (newHistory) {
+        this.chat.setHistory(newHistory);
+      }
+    }
+
+    return info;
+  }
+
   async prompt(params: acp.PromptRequest): Promise<acp.PromptResponse> {
     this.pendingPrompt?.abort();
     const pendingSend = new AbortController();
@@ -697,6 +735,10 @@ export class Session {
     await this.context.config.waitForMcpInit();
 
     const promptId = Math.random().toString(16).slice(2);
+    
+    // Attempt to compress chat history if approaching budget
+    await this.tryCompressChat(promptId, false, pendingSend.signal);
+
     const chat = this.chat;
 
     const parts = await this.#resolvePrompt(params.prompt, pendingSend.signal);
